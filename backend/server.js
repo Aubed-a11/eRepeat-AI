@@ -27,7 +27,10 @@ const PROD = process.env.NODE_ENV === 'production';
 const PORT = +process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const PUBLIC_DIR = process.env.PUBLIC_DIR || path.join(__dirname, '..', 'public');
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGIN || '').split(',').map(x => x.trim().replace(/\/$/, '')).filter(Boolean);
+const ALLOWED_RAW = (process.env.ALLOWED_ORIGIN || '').split(',').map(x => x.trim().replace(/\/$/, '')).filter(Boolean);
+/* ALLOWED_ORIGIN=* : n'importe quelle application (site, mobile) peut appeler l'API. Sans danger ici : l'accès se fait par jeton dans l'en-tête, jamais par cookie. */
+const ALLOW_ANY = ALLOWED_RAW.includes('*');
+const ALLOWED_ORIGINS = ALLOWED_RAW.filter(x => x !== '*');
 const CODE_TTL = 10 * 60 * 1000;
 const RESEND_GAP = (+process.env.RESEND_GAP_SECONDS || 30) * 1000;
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
@@ -202,8 +205,8 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'" + (ALLOWED_ORIGINS.length ? ' ' + ALLOWED_ORIGINS.join(' ') : '') + "; frame-ancestors 'none'");
-  if (req.headers.origin && ALLOWED_ORIGINS.includes(req.headers.origin)) {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin);
+  if (req.headers.origin && (ALLOW_ANY || ALLOWED_ORIGINS.includes(req.headers.origin))) {
+    res.setHeader('Access-Control-Allow-Origin', ALLOW_ANY ? '*' : req.headers.origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
