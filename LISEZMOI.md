@@ -82,12 +82,22 @@ Tests du serveur : `npm test` dans `backend/`.
 - Ne publiez jamais `backend/.env`.
 - Notez l'adresse e-mail et le mot de passe de chaque service (GitHub, Vercel, Render, Neon, Brevo) dans un endroit sûr.
 
+## Classes, matières, sujets et IA
+
+- À l'inscription, l'élève choisit sa classe (CP à Terminale) ; il peut la changer dans son profil. Les sujets proposés dépendent de la classe.
+- Dans « Exercices », l'élève choisit une matière (Mathématiques, Français, Sciences physiques et SVT, Anglais, Histoire-Géographie), puis un sujet de sa classe ou écrit le sien. Une zone facultative « Mon cours » permet de coller son cours.
+- La liste des sujets est une proposition courante par classe, **pas le programme officiel béninois mot pour mot** : à faire relire par un enseignant, puis à corriger dans `frontend/src/lib/catalog.js`.
+- **Sans clé IA** : les exercices de calcul de base (CP à CM1) et ceux de 3e (équations, calcul littéral, Pythagore, figures de style, conjugaison) sont générés localement et sont exacts. Les autres sujets affichent « exercices IA bientôt ». Le coach donne des conseils de méthode et ne lit pas le cours collé.
+- **Avec clé IA** : le serveur fait écrire les exercices par Claude, puis les fait résoudre une seconde fois par un appel indépendant ; seuls les exercices dont les deux réponses concordent sont montrés. Le cours collé sert de base aux exercices et au coach. Ce contrôle réduit beaucoup les erreurs mais ne les supprime pas : l'élève est invité à vérifier avec son répétiteur.
+- Activer l'IA sur le VPS : `nano /opt/erepeat/app/backend/.env`, ajouter `ANTHROPIC_API_KEY=...`, puis `systemctl restart erepeat`. Chaque demande d'exercices coûte deux appels, chaque message du coach un appel. `AI_DAILY_CAP` limite le nombre d'appels par jour.
+- Le cours collé n'est pas enregistré par eRepeat AI : il est envoyé au service d'IA au moment de la demande.
+
 ## Limites à connaître
 
 - Un seul serveur Render à la fois : le serveur garde ses données en mémoire et les écrit en base juste après chaque changement. Ne le dupliquez pas.
 - Sur ordinateur, l'application s'affiche en colonne centrée de la largeur d'un téléphone. Une vraie mise en page large viendra plus tard.
 - L'envoi par Gmail n'a pas pu être essayé depuis l'environnement de développement ; l'envoi par Brevo a été testé contre un serveur simulé, pas contre le vrai Brevo. Le premier essai réel est l'étape 7.
-- Le coach IA répond avec des réponses de base. Pour brancher une vraie IA, il faut une passerelle (`VITE_AI_ENDPOINT`) : à faire à part, pour ne jamais exposer de clé dans l'application.
+- L'IA (exercices générés et coach) est prête mais **éteinte tant que `ANTHROPIC_API_KEY` n'est pas renseignée** dans `backend/.env`. Voir la section suivante.
 
 ## La suite : Spring Boot et application mobile
 

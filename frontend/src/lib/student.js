@@ -1,12 +1,14 @@
 /* État de l'élève : maîtrise par chapitre, historique, séances. Enregistré sur l'appareil, puis envoyé au serveur. */
-import { CH, TAGS } from './content.js';
+import { TAGS } from './content.js';
+import { CHN, SUBJECTS, freeId, topicsOfGrade } from './catalog.js';
 
-export const emptyState = () => ({ diag: false, mastery: {}, hist: [], done: [], chat: [] });
+export const emptyFocus = () => ({ subj: 'm', tid: '', topic: '', course: '' });
+export const emptyState = () => ({ diag: false, mastery: {}, hist: [], done: [], chat: [], focus: emptyFocus() });
 export function loadState(uid) {
   let d = null;
   try { d = JSON.parse(localStorage.getItem('erepeat_ai_v2_' + uid)); } catch (e) { /* aucun état */ }
   d = d || {};
-  return { diag: !!d.diag, mastery: d.mastery || {}, hist: d.hist || [], done: d.done || [], chat: d.chat || [] };
+  return { diag: !!d.diag, mastery: d.mastery || {}, hist: d.hist || [], done: d.done || [], chat: d.chat || [], focus: { ...emptyFocus(), ...(d.focus || {}) } };
 }
 export function storeState(uid, s) { try { localStorage.setItem('erepeat_ai_v2_' + uid, JSON.stringify(s)); } catch (e) { /* plein */ } }
 export const dropState = uid => { try { localStorage.removeItem('erepeat_ai_v2_' + uid); } catch (e) { /* rien */ } };
@@ -27,24 +29,28 @@ export function rate(s) {
   if (!r.length) return null;
   return Math.round(100 * r.filter(h => h.first).length / r.length);
 }
-export const ranked = s => CH.slice().sort((a, b) => { const pa = P(s, a.id), pb = P(s, b.id); return (pa === null ? .5 : pa) - (pb === null ? .5 : pb); });
+/* Sujets évalués de la classe de l'élève (sujets du catalogue de sa classe, plus les sujets libres). */
+export const evaluated = (s, grade) => topicsOfGrade(grade).concat(SUBJECTS.map(x => CHN(freeId(x.id)))).filter(t => P(s, t.id) !== null);
+export const ranked = (s, grade) => evaluated(s, grade).sort((a, b) => P(s, a.id) - P(s, b.id));
 export function topTag(s, chap) {
   const l = s.hist.filter(h => h.tag && (!chap || h.chap === chap)).slice(-20);
   if (!l.length) return null;
   const c = {}; l.forEach(h => { c[h.tag] = (c[h.tag] || 0) + 1; });
   return Object.keys(c).sort((a, b) => c[b] - c[a])[0];
 }
-export function globalPct(s) {
-  const v = CH.map(c => P(s, c.id)).filter(x => x !== null);
+export function globalPct(s, grade) {
+  const v = evaluated(s, grade).map(t => P(s, t.id));
   return v.length ? Math.round(100 * v.reduce((a, b) => a + b, 0) / v.length) : null;
 }
-export function reco(s, name) {
-  if (!s.diag) return { chap: null, text: 'Commence par un diagnostic de 10 questions, ' + name + '. Il me permet de repérer tes points forts et ce qu’il faut renforcer.', reason: 'Aucun résultat pour le moment : le diagnostic sert de point de départ.' };
-  const w = ranked(s)[0], p = Math.round((P(s, w.id) || 0) * 100), t = topTag(s, w.id) || topTag(s);
+export function reco(s, name, grade) {
+  const rk = ranked(s, grade);
+  if (!rk.length) return { chap: null, text: 'Commence par un diagnostic dans la matière de ton choix, ' + name + '. Il me permet de repérer tes points forts et ce qu’il faut renforcer.', reason: 'Aucun résultat pour le moment : le diagnostic sert de point de départ.' };
+  const w = rk[0], p = Math.round(P(s, w.id) * 100), t = topTag(s, w.id) || topTag(s);
   return {
     chap: w.id,
-    text: 'Aujourd’hui, travaille « ' + w.name + ' » : tu maîtrises ' + p + ' % de ce chapitre.' + (t ? ' Des erreurs de type « ' + TAGS[t].toLowerCase() + ' » ont été repérées dans tes derniers exercices.' : ''),
-    reason: 'Ce chapitre a le niveau de maîtrise le plus bas parmi tes cinq chapitres' + (t ? ', et c’est là que reviennent le plus tes erreurs « ' + TAGS[t].toLowerCase() + ' ».' : '.')
+    text: 'Aujourd’hui, travaille « ' + w.name + ' » : tu maîtrises ' + p + ' % de ce sujet.' + (t ? ' Des erreurs de type « ' + TAGS[t].toLowerCase() + ' » ont été repérées dans tes derniers exercices.' : ''),
+    reason: 'Ce sujet a le niveau de maîtrise le plus bas parmi ceux que tu as déjà travaillés' + (t ? ', et c’est là que reviennent le plus tes erreurs « ' + TAGS[t].toLowerCase() + ' ».' : '.')
   };
 }
-export const gpOf = m => { const v = CH.map(c => m[c.id]).filter(x => typeof x === 'number'); return v.length ? Math.round(100 * v.reduce((a, b) => a + b, 0) / v.length) : null; };
+/* Moyenne de maîtrise, tous sujets confondus (vues du parent et du répétiteur). */
+export const gpOf = m => { const v = Object.keys(m || {}).map(k => m[k]).filter(x => typeof x === 'number'); return v.length ? Math.round(100 * v.reduce((a, b) => a + b, 0) / v.length) : null; };

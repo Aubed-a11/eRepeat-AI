@@ -1,20 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { CH, CHN, LESSONS, TAGS, gen } from '../lib/content.js';
-import { P, levelFor, ranked, reco } from '../lib/student.js';
+import { LESSONS, TAGS } from '../lib/content.js';
+import { CHN, gradeName, subjById } from '../lib/catalog.js';
+import { P, levelFor, reco } from '../lib/student.js';
 import { askAI, localCoach } from '../lib/coach.js';
+import { aiQuestions, aiStatus, hasLocal, localQ } from '../lib/exo.js';
+import { useAuth } from '../context/App.jsx';
 import { useStudent } from '../context/Student.jsx';
 import { Banner, IcCheck, IcClock, MastBar, Ring } from '../components/ui.jsx';
 
 const LETTERS = 'ABCD';
 
-function buildItems(mode, chap) {
+function buildItems(mode, chap, o) {
   const items = [];
   if (mode === 'diag') {
-    CH.forEach(c => { for (let k = 0; k < 2; k++) items.push({ t: 'q', chap: c.id, ph: 'Diagnostic', nohint: true, diag: true, noretry: true }); });
+    o.diag.forEach(id => { for (let k = 0; k < 2; k++) items.push({ t: 'q', chap: id, ph: 'Diagnostic', nohint: true, diag: true, noretry: true }); });
   } else if (mode === 'guided') {
-    items.push({ t: 'lesson', chap, ph: 'Comprendre la notion' });
+    if (LESSONS[chap] || o.course) items.push({ t: 'lesson', chap, ph: o.course && !LESSONS[chap] ? 'Relire ton cours' : 'Comprendre la notion' });
     for (let i = 0; i < 3; i++) items.push({ t: 'q', chap, ph: 'Essayer avec un indice' });
     for (let i = 0; i < 3; i++) items.push({ t: 'q', chap, ph: 'Vérifier ta réponse', nohint: true, noretry: true });
     for (let i = 0; i < 2; i++) items.push({ t: 'q', chap, ph: 'Exercice personnalisé', boost: true });
@@ -24,6 +27,7 @@ function buildItems(mode, chap) {
   return items;
 }
 
+/* Question suivante : tirée du lot préparé par l'IA si le sujet en a un, sinon générée localement. */
 function makeCur(sess, S) {
   const it = sess.items[sess.i];
   if (!it) return null;
@@ -31,12 +35,21 @@ function makeCur(sess, S) {
   let lv = levelFor(S, it.chap);
   if (it.diag) { const r = sess.diagRes[it.chap] || (sess.diagRes[it.chap] = { sc: 0, n: 0, last: null }); lv = r.last === null ? 2 : (r.last ? 3 : 1); }
   else if (it.boost) lv += 1;
-  return { q: gen(it.chap, lv), it, pick: null, tries: 0, hints: 0, wrong: {}, done: false, msg: null, ai: null };
+  const queue = sess.queues[it.chap];
+  const q = queue && queue.length ? queue.shift() : localQ(it.chap, lv);
+  return { q, it, pick: null, tries: 0, hints: 0, wrong: {}, done: false, msg: null, ai: null };
 }
+
+/* Sujets dont les exercices viennent de l'IA : sans générateur local, ou avec un cours collé (si l'IA est activée). */
+const aiTopics = sess => {
+  const ids = []; sess.items.forEach(it => { if (it.t === 'q' && ids.indexOf(it.chap) < 0 && (!hasLocal(it.chap) || (sess.course && !it.diag))) ids.push(it.chap); });
+  return ids;
+};
 
 export default function Session() {
   const loc = useLocation();
   const nav = useNavigate();
+  const { user } = useAuth();
   const { S, update, name } = useStudent();
   const st = loc.state;
   const [, tick] = useState(0);
@@ -44,11 +57,56 @@ export default function Session() {
   const holder = useRef(null);
   const fbEnd = useRef(null);
   const [toastMsg, setToastMsg] = useState('');
+  const [prep, setPrep] = useState(null);
 
   if (!holder.current && st) {
-    const sess = { mode: st.mode, chap: st.chap, items: buildItems(st.mode, st.chap), i: 0, ok: 0, n: 0, hints: 0, tags: {}, diagRes: {}, finished: false };
-    holder.current = { sess, cur: makeCur(sess, S) };
+    const diag = st.mode === 'diag' ? (st.diag && st.diag.length ? st.diag : [st.chap]) : null;
+    const sess = { mode: st.mode, chap: st.chap, subj: st.subj, course: (st.course || '').trim(), topicName: st.topicName || '', items: null, queues: {}, i: 0, ok: 0, n: 0, hints: 0, tags: {}, diagRes: {}, diagNeed: {}, finished: false };
+    sess.items = buildItems(st.mode, st.chap, { diag, course: sess.course });
+    holder.current = { sess, cur: null, started: false };
+    if (!aiTopics(sess).length) holder.current.cur = makeCur(sess, S);
   }
+
+  /* Préparation des exercices par l'IA (lot vérifié par le serveur) */
+  async function prepare() {
+    const h = holder.current, sess = h.sess;
+    setPrep({ state: 'loading' });
+    try {
+      const on = await aiStatus();
+      const ids = aiTopics(sess).filter(id => on || !hasLocal(id));
+      if (!on && ids.length) throw new Error('Les exercices de ce sujet sont préparés par l’IA, qui n’est pas encore activée.');
+      const jobs = ids.map(async id => {
+        const t = CHN(id), n = sess.items.filter(x => x.t === 'q' && x.chap === id).length;
+        const level = sess.mode === 'diag' ? 2 : levelFor(S, id);
+        const topicName = id === sess.chap && sess.topicName ? sess.topicName : t.name;
+        const list = await aiQuestions({ chap: id, grade: user.grade, subjName: t.subjName || (subjById(sess.subj) || {}).name, topicName, level, n, course: id === sess.chap ? sess.course : '' });
+        return [id, list];
+      });
+      const done = await Promise.allSettled(jobs);
+      let lastErr = null;
+      done.forEach((d, k) => { if (d.status === 'fulfilled') sess.queues[d.value[0]] = d.value[1]; else lastErr = d.reason; });
+      /* On garde seulement les questions disponibles pour chaque sujet préparé par l'IA. */
+      let keep = sess.items.slice();
+      ids.forEach(id => {
+        const have = (sess.queues[id] || []).length;
+        let extra = keep.filter(x => x.t === 'q' && x.chap === id).length - have;
+        if (sess.mode === 'diag') sess.diagNeed[id] = Math.min(2, have);
+        for (let k = keep.length - 1; k >= 0 && extra > 0; k--) if (keep[k].t === 'q' && keep[k].chap === id) { keep.splice(k, 1); extra--; }
+      });
+      if (!keep.some(x => x.t === 'q')) throw lastErr || new Error('Aucun exercice disponible.');
+      sess.items = keep;
+      h.cur = makeCur(sess, S);
+      setPrep(null);
+    } catch (e) {
+      setPrep({ state: 'error', msg: (e && e.message) || 'Les exercices n’ont pas pu être préparés. Réessaie.' });
+    }
+  }
+  useEffect(() => {
+    const h = holder.current;
+    if (h && !h.cur && !h.started) { h.started = true; prepare(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fbKey = holder.current && holder.current.cur && !holder.current.cur.lesson ? holder.current.cur.hints + '|' + (holder.current.cur.msg ? holder.current.cur.msg.t : '') + '|' + (holder.current.cur.ai || '') : '';
   const lastKey = useRef('');
   useEffect(() => {
@@ -59,17 +117,42 @@ export default function Session() {
   const h = holder.current, sess = h.sess;
   const quit = () => nav(sess.finished ? '/accueil' : '/exercices');
 
+  if (!h.cur) {
+    const err = prep && prep.state === 'error';
+    return (
+      <>
+        <div className="exhead"><button className="back" data-a="quit" aria-label="Quitter la séance" onClick={quit}>Quitter</button><h2>Préparation</h2></div>
+        <div className="card prep" role="status">
+          {err ? (
+            <>
+              <h2>Je n’ai pas pu préparer tes exercices</h2>
+              <p className="sub">{prep.msg}</p>
+              <div className="actions col"><button className="btn" data-a="retry" onClick={() => { h.started = true; prepare(); }}>Réessayer</button><button className="btn ghost" onClick={quit}>Retour</button></div>
+            </>
+          ) : (
+            <>
+              <h2>Je prépare tes exercices…</h2>
+              <p className="sub">{gradeName(user.grade)} · {(CHN(sess.chap).subjName || '')}{sess.topicName ? ' · ' + sess.topicName : ''}</p>
+              <span className="dots"><span /><span /><span /></span>
+              <p className="note">L’IA écrit les exercices, puis chacun est vérifié une seconde fois avant de t’être montré. Cela peut prendre une vingtaine de secondes.</p>
+            </>
+          )}
+        </div>
+      </>
+    );
+  }
+
   function record(ok) {
     const cur = h.cur, it = cur.it, q = cur.q, first = ok && cur.tries === 0 && cur.hints === 0;
     let tag = null; for (const w in cur.wrong) { tag = q.tags[w]; break; }
     sess.n++; if (ok) sess.ok++; sess.hints += cur.hints; if (tag) sess.tags[tag] = (sess.tags[tag] || 0) + 1;
     let diagMastery = null;
-    if (it.diag) { const r = sess.diagRes[it.chap]; r.n++; if (ok) r.sc++; r.last = ok; if (r.n >= 2) diagMastery = r.sc === 2 ? .8 : r.sc === 1 ? .5 : .2; }
+    if (it.diag) { const r = sess.diagRes[it.chap]; r.n++; if (ok) r.sc++; r.last = ok; if (r.n >= (sess.diagNeed[it.chap] || 2)) diagMastery = r.sc === r.n ? .8 : r.sc / r.n >= .5 ? .5 : .2; }
     update(s => {
-      s.hist.push({ t: Date.now(), chap: q.chap, ok, first: it.diag ? undefined : first, tag });
+      s.hist.push({ t: Date.now(), chap: it.chap, ok, first: it.diag ? undefined : first, tag });
       if (s.hist.length > 400) s.hist = s.hist.slice(-400);
       if (it.diag) { if (diagMastery !== null) s.mastery[it.chap] = diagMastery; }
-      else { let p = typeof s.mastery[q.chap] === 'number' ? s.mastery[q.chap] : .5; s.mastery[q.chap] = ok ? p + (1 - p) * (first ? .25 : .12) : p - p * .25; }
+      else { let p = typeof s.mastery[it.chap] === 'number' ? s.mastery[it.chap] : .5; s.mastery[it.chap] = ok ? p + (1 - p) * (first ? .25 : .12) : p - p * .25; }
       return s;
     });
   }
@@ -104,8 +187,9 @@ export default function Session() {
   }
   async function explain() {
     const c = h.cur, q = c.q; c.ai = '…'; rerender();
-    const prompt = 'Exercice : ' + q.q + ' ' + q.sub + '\nChoix proposés : ' + q.opts.join(' | ') + '\nL’élève a eu du mal. Explique autrement la méthode, avec un exemple de la vie courante au Bénin, en 5 lignes maximum. ' + (c.done ? 'La solution est déjà affichée : tu peux la rappeler.' : 'Ne donne pas la réponse finale.');
-    try { c.ai = await askAI([{ role: 'user', content: prompt }], S, name); }
+    const prompt = 'Exercice : ' + q.q + ' ' + q.sub + '\nChoix proposés : ' + q.opts.join(' | ') + '\nL’élève a eu du mal. Explique autrement la méthode, avec un exemple de la vie courante au Bénin, en 5 lignes maximum. ' + (c.done ? 'La solution est : ' + q.opts[q.ans] + '.' : 'Ne donne pas encore la réponse finale.');
+    const t = CHN(c.it.chap);
+    try { c.ai = await askAI([{ role: 'user', content: prompt }], { subjName: t.subjName, topic: c.it.chap === sess.chap && sess.topicName ? sess.topicName : t.name, course: c.it.chap === sess.chap ? sess.course : '' }); }
     catch (e) { c.ai = q.hints[Math.min(c.hints, 2)] + ' Pour t’entraîner, refais le calcul pas à pas sur un exemple plus simple.'; }
     rerender();
   }
@@ -119,16 +203,28 @@ export default function Session() {
         <h2>{sess.mode === 'diag' ? 'Diagnostic' : 'Exercice de Révision'}</h2>
         <span className="timechip"><IcClock />{left} min</span>
       </div>
-      <div className="sesstop"><span className="schip">{ch.subj}</span><span className="phase">{it.ph}</span><span className="sub">{Math.min(sess.i + 1, n)} / {n}</span></div>
+      <div className="sesstop"><span className="schip">{ch.subjName}</span><span className="phase">{it.ph}</span><span className="sub">{Math.min(sess.i + 1, n)} / {n}</span></div>
       <div className="bar" style={{ marginBottom: 6 }}><i style={{ width: Math.round(i / n * 100) + '%' }} /></div>
     </>
   );
 
-  if (sess.finished) return <Bilan sess={sess} S={S} onQuit={quit} onStart={(m, c) => { holder.current = null; nav('/exercices/seance', { state: { mode: m, chap: c }, replace: true }); rerender(); }} />;
+  if (sess.finished) return <Bilan sess={sess} S={S} onQuit={quit} onStart={(m, c) => { if (!c) { nav('/exercices'); return; } holder.current = null; nav('/exercices/seance', { state: { mode: m, chap: c }, replace: true }); rerender(); }} />;
 
   const cur = h.cur;
   if (cur.lesson) {
     const L = LESSONS[it.chap];
+    if (!L) {
+      return (
+        <>
+          {header}
+          <div className="qbox lesson">
+            <div className="eyebrow">Relire ton cours avant de répondre</div>
+            <div className="pastecourse">{sess.course}</div>
+          </div>
+          <button className="btn big block" data-a="lessonok" onClick={() => { sess.i++; h.cur = makeCur(sess, S); rerender(); }}>J’essaie un exercice</button>
+        </>
+      );
+    }
     return (
       <>
         {header}
@@ -149,7 +245,7 @@ export default function Session() {
     <>
       {header}
       <div className="qbox">
-        <div className="eyebrow">{ch.name} · niveau {q.level}</div>
+        <div className="eyebrow">{it.chap === sess.chap && sess.topicName ? sess.topicName : ch.name} · niveau {q.level}</div>
         <p className="qn" style={{ marginTop: 10 }}><b>{sess.i + 1}.</b> {q.sub}</p>
         <div className={'q' + (q.q.length > 30 ? ' long' : '')}>{q.q}</div>
         <div className="opts">
@@ -189,9 +285,10 @@ export default function Session() {
 
 function Bilan({ sess, S, onQuit, onStart }) {
   const { name } = useStudent();
+  const { user } = useAuth();
   const s = sess, pc = s.n ? Math.round(100 * s.ok / s.n) : 0;
   const tk = Object.keys(s.tags).sort((a, b) => s.tags[b] - s.tags[a])[0];
-  const r = reco(S, name);
+  const r = reco(S, name, user.grade);
   return (
     <>
       <div className="qbox res">
@@ -201,18 +298,18 @@ function Bilan({ sess, S, onQuit, onStart }) {
         <Banner p={pc} />
       </div>
       {s.mode === 'diag' ? (
-        <div className="card"><h2>Ton niveau par chapitre</h2>
-          {CH.map(c => { const p = P(S, c.id) || 0; const l = p >= .7 ? 'Solide' : p >= .45 ? 'À consolider' : 'À renforcer'; return (
+        <div className="card"><h2>Ton niveau par sujet</h2>
+          {sess.items.filter((x, k, a) => a.findIndex(y => y.chap === x.chap) === k).map(x => CHN(x.chap)).map(c => { const p = P(S, c.id) || 0; const l = p >= .7 ? 'Solide' : p >= .45 ? 'À consolider' : 'À renforcer'; return (
             <div className="chrow" key={c.id}><span className="ic">{c.ic}</span><span className="tx"><b>{c.name}</b><small>{l}</small><MastBar value={p} /></span><span className="pct">{Math.round(p * 100)}%</span></div>
           ); })}
         </div>
       ) : null}
       <div className="card point"><h2>Ce que j’ai remarqué</h2>
         <p>{tk ? 'Tes erreurs étaient surtout de type « ' + TAGS[tk].toLowerCase() + ' ». Je te proposerai des exercices pour ce point.' : 'Aucune erreur marquante sur cette séance.'}</p>
-        <span className="tag">Analyse faite par l’IA</span>
+        <span className="tag">Analyse automatique de tes réponses</span>
       </div>
       <div className="actions">
-        <button className="btn" data-a={r.chap ? 'guided' : 'diag'} data-c={r.chap || ''} onClick={() => onStart(r.chap ? 'guided' : 'diag', r.chap)}>{r.chap ? 'Séance suivante : ' + CHN(r.chap).name : 'Refaire un diagnostic'}</button>
+        <button className="btn" data-a={r.chap ? 'guided' : 'diag'} data-c={r.chap || ''} onClick={() => onStart('guided', r.chap)}>{r.chap ? 'Séance suivante : ' + CHN(r.chap).name : 'Choisir un sujet'}</button>
         <button className="btn ghost" data-a="quit" onClick={onQuit}>Terminer</button>
       </div>
     </>

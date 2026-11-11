@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { CH, CHN } from '../lib/content.js';
+import { CHN, SUBJECTS as CAT_SUBJECTS, gradeName, topicsOfGrade } from '../lib/catalog.js';
 import { kidsStore, useKids, useWorks, worksStore } from '../lib/data.js';
 import { fdate } from '../lib/format.js';
 import { useToast } from '../context/App.jsx';
@@ -9,7 +9,7 @@ import { ConfirmButton, FileField, IcCheck } from '../components/ui.jsx';
 import { FileLine } from './Works.jsx';
 
 const L = 'ABCD';
-const SUBJECTS = ['Mathématiques', 'Français', 'Sciences physiques', 'Autre'];
+const SUBJECTS = ['Mathématiques', 'Français', 'Sciences physiques et SVT', 'Anglais', 'Histoire-Géographie', 'Autre'];
 const kindLabel = k => (k === 'cours' ? 'Cours' : 'Exercice');
 const newBld = () => ({ kind: 'cours', title: '', subject: 'Mathématiques', body: '', due: '', ids: null, qs: [], file: null });
 
@@ -78,23 +78,25 @@ function Builder({ kids, onClose, onDone }) {
 function Assign({ kids, reload }) {
   const toast = useToast();
   const [si, setSi] = useState(0);
-  const [chap, setChap] = useState(CH[0].id);
+  const [chap, setChap] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const k = kids[si] || kids[0];
+  const list = topicsOfGrade((k && k.grade) || '3e');
+  const chapOk = list.some(t => t.id === chap) ? chap : (list[0] && list[0].id) || '';
   async function assign() {
     if (!k || busy) return;
     setBusy(true);
-    try { await api('POST', '/assign', { studentId: k.studentId, chap, note }); setNote(''); await reload(); toast('Devoir envoyé à ' + k.name + '.'); }
+    try { await api('POST', '/assign', { studentId: k.studentId, chap: chapOk, note }); setNote(''); await reload(); toast('Devoir envoyé à ' + k.name + '.'); }
     catch (e) { toast(e.message); }
     setBusy(false);
   }
   return (
     <>
-      <div className="card" style={{ marginTop: 0 }}><h2>Donner un chapitre à réviser</h2><p className="sub" style={{ margin: 0 }}>Donnez un chapitre du programme : il apparaît sur l’accueil de l’élève, avec la séance guidée de l’IA.</p></div>
-      <div className="card"><h2>Choisir le chapitre</h2>
-        <div className="field"><label htmlFor="tk-st">Élève</label><select className="in" id="tk-st" value={si} onChange={e => setSi(+e.target.value)}>{kids.map((x, i) => <option key={x.studentId} value={i}>{x.name}</option>)}</select></div>
-        <div className="field"><label htmlFor="tk-ch">Chapitre</label><select className="in" id="tk-ch" value={chap} onChange={e => setChap(e.target.value)}>{CH.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+      <div className="card" style={{ marginTop: 0 }}><h2>Donner un sujet à réviser</h2><p className="sub" style={{ margin: 0 }}>Donnez un sujet de la classe de l’élève : il apparaît sur l’accueil de l’élève, avec la séance guidée de l’IA.</p></div>
+      <div className="card"><h2>Choisir le sujet</h2>
+        <div className="field"><label htmlFor="tk-st">Élève</label><select className="in" id="tk-st" value={si} onChange={e => setSi(+e.target.value)}>{kids.map((x, i) => <option key={x.studentId} value={i}>{x.name}{x.grade ? ' (' + gradeName(x.grade) + ')' : ''}</option>)}</select></div>
+        <div className="field"><label htmlFor="tk-ch">Sujet</label><select className="in" id="tk-ch" value={chapOk} onChange={e => setChap(e.target.value)}>{CAT_SUBJECTS.map(sj => { const l = list.filter(t => t.subj === sj.id); return l.length ? <optgroup key={sj.id} label={sj.name}>{l.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null; })}</select></div>
         <div className="field"><label htmlFor="tk-nt">Consigne (facultatif)</label><input className="in" id="tk-nt" maxLength={200} value={note} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') assign(); }} placeholder="Ex. À finir avant jeudi" /></div>
         <button className="btn block" data-a="assign" disabled={busy} onClick={assign}>Donner le devoir</button>
       </div>

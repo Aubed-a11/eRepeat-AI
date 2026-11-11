@@ -5,6 +5,7 @@ import { maskEmail } from '../lib/format.js';
 import { getPending, setPending } from '../lib/pending.js';
 import { useAuth, useToast } from '../context/App.jsx';
 import mark from '../assets/mark.png';
+import { GradeSelect } from '../components/Focus.jsx';
 
 const ROLES = [
   ['student', 'Élève', 'Je révise mes cours avec l’IA', <svg key="s" viewBox="0 0 24 24"><path d="M4 5.5C6.5 4 9.5 4 12 5.5c2.5-1.5 5.5-1.5 8 0V19c-2.5-1.5-5.5-1.5-8 0-2.5-1.5-5.5-1.5-8 0z" /><path d="M12 5.5V19" /></svg>],
@@ -58,14 +59,16 @@ export function Welcome() {
 
 export function Signup() {
   const nav = useNavigate();
-  const [f, setF] = useState({ role: 'student', name: '', email: '', pw: '', ok: false });
+  const [f, setF] = useState({ role: 'student', name: '', email: '', pw: '', grade: '', ok: false });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = k => v => setF(x => ({ ...x, [k]: v }));
   async function submit() {
-    if (busy) return; setErr(''); setBusy(true);
+    if (busy) return; setErr('');
+    if (f.role === 'student' && !f.grade) { setErr('Choisis ta classe.'); return; }
+    setBusy(true);
     try {
-      const r = await api('POST', '/signup', { role: f.role, name: f.name, email: f.email, password: f.pw, consent: f.ok });
+      const r = await api('POST', '/signup', { role: f.role, name: f.name, email: f.email, password: f.pw, grade: f.role === 'student' ? f.grade : undefined, consent: f.ok });
       setPending({ email: f.email.trim().toLowerCase(), masked: r.email, end: Date.now() + (r.wait || 30) * 1000, info: '' });
       nav('/verification');
     } catch (e) { setErr(e.message); }
@@ -85,6 +88,7 @@ export function Signup() {
       </div>
       <Field label="Prénom" id="su-name" value={f.name} onChange={set('name')} ac="given-name" maxLength={40} />
       <Field label="Adresse e-mail" id="su-email" type="email" value={f.email} onChange={set('email')} ac="email" inputMode="email" maxLength={120} autoCapitalize="none" />
+      {f.role === 'student' ? <GradeSelect id="su-grade" value={f.grade} onChange={set('grade')} /> : null}
       <PwField label="Mot de passe (8 caractères minimum)" id="su-pw" value={f.pw} onChange={set('pw')} ac="new-password" />
       <label className="check"><input type="checkbox" id="su-ok" checked={f.ok} onChange={e => set('ok')(e.target.checked)} /><span id="consent-txt">{consentText(f.role)}</span></label>
       <Err msg={err} />

@@ -10,14 +10,6 @@ var xt=function(a){return a===1?'x':a===-1?MINUS+'x':(a<0?MINUS+Math.abs(a):a)+'
 
 /* ---------- Contenu pédagogique ---------- */
 var TAGS={methode:'Erreur de méthode',calcul:'Erreur de calcul',signe:'Erreur de signe',oubli:'Étape oubliée',notion:'Notion à revoir'};
-var CH=[
- {id:'m_eq',subj:'Mathématiques',name:'Équations du premier degré',ic:'x'},
- {id:'m_calc',subj:'Mathématiques',name:'Calcul littéral',ic:'a'},
- {id:'m_pyth',subj:'Mathématiques',name:'Théorème de Pythagore',ic:'△'},
- {id:'f_fig',subj:'Français',name:'Figures de style',ic:'F'},
- {id:'f_conj',subj:'Français',name:'Conjugaison',ic:'C'}
-];
-var CHN=function(id){return CH.filter(function(c){return c.id===id;})[0];};
 var LESSONS={
  m_eq:{title:'Isoler l’inconnue dans une équation',p:['Une équation est une égalité qui contient une valeur inconnue, souvent notée x. Pour la trouver, on fait la même opération des deux côtés de l’égalité.','On annule ce qui accompagne x avec l’opération inverse : le contraire de + est −, le contraire de × est ÷.'],ex:['x + 3 = 7','x + 3 − 3 = 7 − 3','x = 4'],steps:['Lis l’équation en entier.','Repère l’inconnue et ce qui l’accompagne.','Choisis l’opération inverse.','Fais-la des deux côtés.','Vérifie en remplaçant x par ta valeur.']},
  m_calc:{title:'Réduire et développer',p:['Réduire, c’est regrouper les termes semblables : 3x + 2x = 5x. On additionne les coefficients, x reste x.','Développer, c’est distribuer : k(x + m) = kx + km. Le facteur multiplie chaque terme de la parenthèse.'],ex:['3(x + 4)','3 × x + 3 × 4','3x + 12'],steps:['Repère les termes semblables.','Additionne leurs coefficients.','Pour développer, multiplie chaque terme de la parenthèse.','Fais attention aux signes.','Vérifie avec une valeur de x, par exemple x = 1.']},
@@ -116,6 +108,43 @@ function genStatic(bank,chap,level,why){
  var wr=r[3].map(function(t){return {t:t,tag:'notion',why:why};});
  return mk({chap:chap,level:level,q:r[1],sub:chap==='f_fig'?'Quelle est la figure de style ?':'Choisis la bonne forme.',correct:r[2],wrongs:wr,hints:[r[4],'Rappelle-toi la leçon : '+(chap==='f_fig'?'comparaison avec « comme », métaphore sans mot de comparaison.':'l’indicateur de temps guide le choix.'),r[5].split(':')[0]+'…'],expl:r[5]});
 }
+
+/* ---------- Calcul de base (primaire) : générateurs exacts, sans IA ---------- */
+var fm=function(n){return String(n).replace(/\B(?=(\d{3})+(?!\d))/g,' ');};
+var ADD={cp:[10,20,30],ce1:[30,70,100],ce2:[100,400,1000],cm1:[1000,5000,10000],cm2:[10000,30000,100000]};
+var MUL={cp:[[2,3,2,3],[2,5,2,4],[2,5,2,5]],ce1:[[2,5,2,5],[2,9,2,5],[2,9,2,9]],ce2:[[2,9,2,9],[11,30,2,9],[11,60,2,9]],cm1:[[11,60,2,9],[11,99,2,9],[11,99,6,19]],cm2:[[11,99,2,9],[11,99,11,30],[101,300,11,30]]};
+var QMAX={cp:[5,9,10],ce1:[5,9,10],ce2:[9,12,20],cm1:[30,90,150],cm2:[60,200,500]};
+function genArith(kind,grade,level,chap){
+ if(kind==='ops')kind=pick(['add','sub','mul','div']);
+ var a,b,r,q,sub='Choisis le résultat.',wr,hints,expl,mx=(ADD[grade]||ADD.cm1)[level-1];
+ if(kind==='add'){a=rnd(Math.ceil(mx/5)+1,mx);b=rnd(1,mx);r=a+b;q='Calcule : '+fm(a)+' + '+fm(b);
+  wr=[{t:fm(r+10),tag:'calcul',why:'Une retenue est de trop : refais l’addition colonne par colonne.'},{t:fm(r-10),tag:'calcul',why:'Une retenue a été oubliée : refais l’addition colonne par colonne.'},{t:fm(r+1),tag:'calcul',why:'Petite erreur de calcul : vérifie les unités.'},{t:fm(Math.abs(a-b)),tag:'methode',why:'Tu as soustrait : ici il faut additionner.'}];
+  hints=['Additionne d’abord les unités, puis les dizaines, puis les centaines.','Si les unités dépassent 9, écris le chiffre des unités et retiens 1 dizaine.','Vérifie en retirant '+fm(b)+' du résultat : tu dois retrouver '+fm(a)+'.'];
+  expl=fm(a)+' + '+fm(b)+' = '+fm(r)+'. Vérification : '+fm(r)+' − '+fm(b)+' = '+fm(a)+'.';}
+ else if(kind==='sub'){a=rnd(Math.ceil(mx/2),mx);b=rnd(1,a-1);r=a-b;q='Calcule : '+fm(a)+' − '+fm(b);
+  wr=[{t:fm(r+10),tag:'calcul',why:'Une retenue a été mal gérée : refais la soustraction colonne par colonne.'},{t:fm(Math.max(0,r-10)),tag:'calcul',why:'Une retenue a été comptée deux fois : vérifie les dizaines.'},{t:fm(r+1),tag:'calcul',why:'Petite erreur de calcul : vérifie les unités.'},{t:fm(a+b),tag:'methode',why:'Tu as additionné : ici il faut soustraire.'}];
+  hints=['Retire le petit nombre du grand nombre en commençant par les unités.','Si tu ne peux pas retirer, prends une dizaine au chiffre de gauche.','Vérifie : ton résultat + '+fm(b)+' doit redonner '+fm(a)+'.'];
+  expl=fm(a)+' − '+fm(b)+' = '+fm(r)+'. Vérification : '+fm(r)+' + '+fm(b)+' = '+fm(a)+'.';}
+ else if(kind==='mul'){var R=(MUL[grade]||MUL.cm1)[level-1];a=rnd(R[0],R[1]);b=rnd(R[2],R[3]);if(grade==='ce1'&&level===1)a=pick([2,3,4,5]);r=a*b;q='Calcule : '+fm(a)+' × '+fm(b);
+  wr=[{t:fm(a+b),tag:'methode',why:'Tu as additionné : ici il faut multiplier.'},{t:fm(r+a),tag:'calcul',why:'Tu as ajouté '+fm(a)+' de trop : compte bien '+b+' fois '+fm(a)+'.'},{t:fm(r-b),tag:'calcul',why:'Un produit est faux : revois ta table de multiplication.'},{t:fm(r+10),tag:'calcul',why:'Une retenue est de trop : vérifie chaque produit.'}];
+  hints=['Multiplier, c’est additionner '+fm(a)+' plusieurs fois : '+b+' fois.','Décompose '+fm(a)+' en dizaines et unités, puis multiplie chaque partie par '+b+'.','Additionne ensuite les résultats des deux parties.'];
+  expl=fm(a)+' × '+fm(b)+' = '+fm(r)+'. Vérification : '+fm(r)+' ÷ '+fm(b)+' = '+fm(a)+'.';}
+ else{b=rnd(2,Math.min(9,level+5));var qm=(QMAX[grade]||QMAX.cm1)[level-1];r=rnd(2,qm);a=b*r;q='Calcule : '+fm(a)+' ÷ '+fm(b);
+  wr=[{t:fm(r+1),tag:'calcul',why:'Vérifie avec la table de '+b+' : '+b+' × '+fm(r+1)+' ne donne pas '+fm(a)+'.'},{t:fm(Math.max(1,r-1)),tag:'calcul',why:'Vérifie avec la table de '+b+' : '+b+' × '+fm(Math.max(1,r-1))+' ne donne pas '+fm(a)+'.'},{t:fm(a-b),tag:'methode',why:'Tu as soustrait : ici il faut diviser.'},{t:fm(a*b),tag:'methode',why:'Tu as multiplié : ici il faut diviser.'}];
+  hints=['Cherche combien de fois '+b+' entre dans '+fm(a)+'.','Utilise la table de '+b+' : quel nombre multiplié par '+b+' donne '+fm(a)+' ?','Vérifie avec une multiplication.'];
+  expl=fm(a)+' ÷ '+fm(b)+' = '+fm(r)+', car '+fm(b)+' × '+fm(r)+' = '+fm(a)+'.';}
+ wr=wr.filter(function(w){return w.t.charAt(0)!=='-';});
+ return mk({chap:chap,level:level,q:q,sub:sub,correct:fm(r),wrongs:wr,filler:function(k){return fm(r+k+1);},hints:hints,expl:expl});
+}
+var GEN_BY_CODE={eq:genEq,calc:genCalc,pyth:genPyth};
+/* Générateur local pour un sujet du catalogue, ou null s'il n'y en a pas (l'IA prend alors le relais). */
+function localFor(t){
+ if(!t)return null;
+ if(LESSONS[t.id]||t.id==='f_fig'||t.id==='f_conj')return function(lv){var g=gen(t.id,lv);return g;};
+ if(GEN_BY_CODE[t.gen])return function(lv){var g=GEN_BY_CODE[t.gen](Math.max(1,Math.min(3,lv)));g.chap=t.id;return g;};
+ if(t.gen==='add'||t.gen==='sub'||t.gen==='mul'||t.gen==='div'||t.gen==='ops')return function(lv){return genArith(t.gen,t.grade,Math.max(1,Math.min(3,lv)),t.id);};
+ return null;
+}
 function gen(chap,level){
  level=Math.max(1,Math.min(3,level));
  if(chap==='m_eq')return genEq(level);
@@ -126,4 +155,4 @@ function gen(chap,level){
 }
 
 
-export { TAGS, CH, CHN, LESSONS, gen, num };
+export { TAGS, LESSONS, gen, num, mk, localFor };

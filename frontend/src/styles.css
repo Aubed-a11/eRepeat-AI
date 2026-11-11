@@ -191,3 +191,23 @@ textarea.in{min-height:96px;resize:vertical;line-height:1.45}
 .kidhead small.mat{font-weight:700;letter-spacing:.4px;color:var(--brand)}
 #main.flexmain{padding:16px 16px 8px;display:flex}
 .hright{display:flex;align-items:center;gap:8px}
+
+/* Classe, matière, sujet et cours collé */
+.coursebox{padding:0;overflow:hidden}
+.coursehead{display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;padding:14px 16px;gap:10px}
+.coursehead b{display:block;font:700 15px var(--display);color:var(--navy)}
+.coursehead small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.coursehead .chev{font:700 20px var(--display);color:var(--brand);width:28px;text-align:center}
+.coursebox textarea{margin:0 16px;width:calc(100% - 32px);min-height:140px}
+.coursebox .note,.coursebox .btn{margin-left:16px;margin-right:16px}
+.coursebox .btn{margin-bottom:14px;margin-top:6px}
+.note.warn{color:#8a4b00}
+.chrow.sel{background:#e3ebfd;border-radius:12px;padding-left:10px;padding-right:10px}
+.gradetag{display:inline-block;background:#e3ebfd;color:var(--navy2);border-radius:20px;padding:3px 10px;font:600 12px var(--display);margin-right:6px}
+.focusbar{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px;margin-bottom:8px;font-size:13px}
+.focusbar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.focusbar .btn{flex:none}
+.prep{text-align:center;padding:28px 16px}
+.prep h2{margin:0 0 6px}
+.pastecourse{white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.5;max-height:55vh;overflow:auto;background:#f6f8ff;border-radius:12px;padding:12px}
+.pastecourse{margin-top:10px}

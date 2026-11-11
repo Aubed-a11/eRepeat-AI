@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { AI_ON } from '../lib/coach.js';
+import { useAiOn } from '../lib/exo.js';
+import { gradeName } from '../lib/catalog.js';
+import { GradeSelect } from '../components/Focus.jsx';
 import { ROLE_LABEL } from '../lib/format.js';
 import { useAuth, useToast } from '../context/App.jsx';
 import { useStudent } from '../context/Student.jsx';
@@ -24,7 +26,9 @@ function ResetResults() {
 }
 
 export default function Profile() {
-  const { user, linked, refreshMe, logout, deleteAccount } = useAuth();
+  const { user, linked, refreshMe, logout, deleteAccount, setGrade } = useAuth();
+  const aiOn = useAiOn();
+  const [chg, setChg] = useState(false);
   const toast = useToast();
   const [canInstall, install] = useInstall();
   const [del, setDel] = useState(false);
@@ -52,9 +56,10 @@ export default function Profile() {
         <div className="row2"><div className="grow"><b>{user.name}</b><small>{user.email}</small></div><span className="pill">{ROLE_LABEL[r]}</span></div>
         {stu ? (
           <>
-            <div className="row2"><div><b>Classe</b><small>3e : mathématiques et français</small></div></div>
-            <div className="row2"><div><b>Mode hors connexion</b><small>Les exercices et leçons restent disponibles sans Internet.</small></div><span className="pill">Disponible</span></div>
-            <div className="row2"><div><b>Tuteur IA</b><small>{AI_ON ? 'IA connectée' : 'Réponses de base hors connexion'}</small></div></div>
+            <div className="row2"><div className="grow"><b>Classe</b><small>{gradeName(user.grade) || 'Non choisie'}</small></div><button className="btn ghost sm" data-a="grade-edit" onClick={() => setChg(v => !v)}>{chg ? 'Fermer' : 'Changer'}</button></div>
+            {chg ? <GradeSelect id="pf-grade" label="Ma classe" value={user.grade || ''} onChange={async g => { try { await setGrade(g); toast('Classe mise à jour : ' + gradeName(g) + '.'); setChg(false); } catch (e) { toast(e.message); } }} /> : null}
+            <div className="row2"><div><b>Sans Internet</b><small>Les exercices préparés sans IA restent disponibles hors connexion.</small></div></div>
+            <div className="row2"><div><b>Tuteur IA</b><small>{aiOn === null ? 'Vérification…' : aiOn ? 'IA activée : exercices vérifiés et coach' : 'Pas encore activée : réponses de base seulement'}</small></div></div>
           </>
         ) : null}
         {canInstall ? <div className="row2"><div><b>Installer l’application</b><small>Ajoute eRepeat AI à l’écran d’accueil ou au bureau.</small></div><button className="btn sm" data-a="install" onClick={install}>Installer</button></div> : null}
@@ -71,7 +76,7 @@ export default function Profile() {
         )) : <p className="note">Aucun accès pour le moment.</p>) : null}
       </div>
       <div className="card"><h2>Confidentialité</h2>
-        <p className="sub">{stu ? 'Tes résultats ne sont visibles que par toi et par les personnes que tu as liées à ton compte. Les échanges avec le coach restent sur cet appareil.' : 'Vous ne voyez que les élèves qui vous ont donné leur code de liaison. Chacun peut retirer cet accès à tout moment.'}</p>
+        <p className="sub">{stu ? 'Tes résultats ne sont visibles que par toi et par les personnes que tu as liées à ton compte. Les échanges avec le coach sont gardés sur cet appareil. Quand l’IA est activée, ta question (et ton cours si tu l’as collé) est envoyée au service d’IA pour te répondre ; eRepeat AI ne les conserve pas.' : 'Vous ne voyez que les élèves qui vous ont donné leur code de liaison. Chacun peut retirer cet accès à tout moment.'}</p>
         <div className="actions col">
           <button className="btn ghost" data-a="logout" onClick={logout}>Se déconnecter</button>
           {stu ? <ResetResults /> : null}

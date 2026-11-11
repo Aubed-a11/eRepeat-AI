@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
-import { CH, TAGS } from '../lib/content.js';
+import { TAGS } from '../lib/content.js';
+import { CHN, gradeName } from '../lib/catalog.js';
 import { kidsStore, useKids } from '../lib/data.js';
 import { ago, fdate } from '../lib/format.js';
 import { gpOf } from '../lib/student.js';
 import { useAuth, useToast } from '../context/App.jsx';
 import { ConfirmButton, IcBars, IcCal, IcPeople, IcTarget, Ring, Tile } from '../components/ui.jsx';
 
-const weakest = m => { let b = null; CH.forEach(c => { const v = m[c.id]; if (typeof v === 'number' && (b === null || v < b.v)) b = { c, v }; }); return b; };
+const weakest = m => { let b = null; Object.keys(m || {}).forEach(id => { const v = m[id]; if (typeof v === 'number' && (b === null || v < b.v)) b = { c: CHN(id), v }; }); return b; };
+const masteryList = m => Object.keys(m || {}).filter(id => typeof m[id] === 'number').map(id => ({ c: CHN(id), v: m[id] })).sort((a, b) => a.v - b.v);
 function advice(k) {
   const s = k.summary, w = weakest(s.mastery), tg = Object.keys(s.errors).sort((a, b) => s.errors[b] - s.errors[a])[0];
-  if (s.empty || !w) return k.name + ' n’a pas encore fait de diagnostic. Invitez-le à commencer par le diagnostic de 10 questions.';
+  if (s.empty || !w) return k.name + ' n’a pas encore fait de diagnostic. Invitez-le à commencer par un diagnostic dans la matière de son choix.';
   return 'Priorité pour ' + k.name + ' : « ' + w.c.name + ' » (' + Math.round(w.v * 100) + ' % maîtrisé).' + (tg ? ' Les erreurs les plus fréquentes sont de type « ' + TAGS[tg].toLowerCase() + ' ».' : '') + ' Trois séances de 15 minutes par semaine suffisent pour progresser.';
 }
 const VBar = ({ v }) => <div className={'bar ' + (typeof v !== 'number' ? '' : v < .45 ? 'bad' : v < .7 ? 'warn' : '')}><i style={{ width: Math.round((v || 0) * 100) + '%' }} /></div>;
@@ -20,7 +22,7 @@ function KidCard({ k, detail, onDetail }) {
   const s = k.summary, g = gpOf(s.mastery);
   return (
     <div className="card">
-      <div className="kidhead"><span className="ic">{k.name.charAt(0).toUpperCase()}</span><div><b>{k.name}</b><small className="mat">{k.matricule || ''}</small><small>Dernière activité : {ago(s.last)}</small></div><Ring p={g} size={64} sub="" /></div>
+      <div className="kidhead"><span className="ic">{k.name.charAt(0).toUpperCase()}</span><div><b>{k.name}</b><small className="mat">{k.matricule || ''}{k.grade ? ' · ' + gradeName(k.grade) : ''}</small><small>Dernière activité : {ago(s.last)}</small></div><Ring p={g} size={64} sub="" /></div>
       <div className="stats" style={{ marginBottom: 10 }}>
         <Tile icon={<IcTarget />} value={s.rate === null ? '0%' : s.rate + '%'} label="Taux de réussite" />
         <Tile icon={<IcCal />} value={s.week} label="Séances (7 j)" />
@@ -100,10 +102,10 @@ export function Kids() {
       <>
         {kids.length > 1 ? <div className="chips">{kids.map((x, i) => <button key={x.studentId} className={'chip' + (i === idx ? ' on' : '')} data-a="kid" aria-pressed={i === idx} onClick={() => setSel(i)}>{x.name}</button>)}</div> : null}
         <KidCard k={k} detail />
-        <div className="card"><h2>Maîtrise par chapitre</h2>
-          {CH.map(c => { const v = s.mastery[c.id]; return (
-            <div key={c.id} style={{ margin: '10px 0' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><b>{c.name}</b><span>{typeof v === 'number' ? Math.round(v * 100) + '%' : 'pas évalué'}</span></div><VBar v={v} /></div>
-          ); })}
+        <div className="card"><h2>Maîtrise par sujet</h2>
+          {masteryList(s.mastery).length ? masteryList(s.mastery).map(({ c, v }) => (
+            <div key={c.id} style={{ margin: '10px 0' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, gap: 8 }}><b>{c.name}</b><span>{Math.round(v * 100) + '%'}</span></div><small style={{ color: 'var(--muted)', fontSize: 11.5 }}>{c.subjName}</small><VBar v={v} /></div>
+          )) : <p className="sub">Aucun sujet évalué pour le moment.</p>}
         </div>
         <div className="card"><h2>Cours et exercices du répétiteur</h2>
           {(k.works || []).length ? k.works.map(w => (

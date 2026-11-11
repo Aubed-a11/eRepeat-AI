@@ -1,6 +1,5 @@
 /* Accès au serveur. L'adresse vient de VITE_API_BASE (vide = même adresse que le site). */
 export const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '');
-export const AI_ENDPOINT = import.meta.env.VITE_AI_ENDPOINT || '';
 const AUTH_KEY = 'erepeat_auth_v2';
 
 let auth = null;

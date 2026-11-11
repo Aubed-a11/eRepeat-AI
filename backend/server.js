@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { promisify } = require('util');
 const scrypt = promisify(crypto.scrypt);
+const AI = require('./ai');
 
 /* Lecture facultative du fichier .env (sans dépendance) */
 try {
@@ -34,7 +35,9 @@ const ALLOWED_ORIGINS = ALLOWED_RAW.filter(x => x !== '*');
 const CODE_TTL = 10 * 60 * 1000;
 const RESEND_GAP = (+process.env.RESEND_GAP_SECONDS || 30) * 1000;
 const SESSION_TTL = 30 * 24 * 3600 * 1000;
-const CHAPTERS = ['m_eq', 'm_calc', 'm_pyth', 'f_fig', 'f_conj'];
+/* Identifiant d'un sujet de travail (ex. m_eq, 6e_m_fractions). La liste des sujets est dans l'application : le serveur vérifie seulement la forme. */
+const TOPIC_RE = /^[a-z0-9][a-z0-9_.-]{0,47}$/;
+const isTopic = k => typeof k === 'string' && TOPIC_RE.test(k);
 const ROLES = ['student', 'parent', 'tutor'];
 
 /* ---------- Configuration ---------- */
@@ -114,7 +117,7 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const hmac = s => crypto.createHmac('sha256', SECRET).update(s).digest('hex');
 const safeEq = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 const mask = e => { const [u, d] = e.split('@'); return u.slice(0, 2) + '***@' + d; };
-const pub = u => ({ id: u.id, role: u.role, name: u.name, email: u.email, matricule: u.matricule });
+const pub = u => { const o = { id: u.id, role: u.role, name: u.name, email: u.email, matricule: u.matricule }; if (u.role === 'student') o.grade = u.grade || null; return o; };
 const byEmail = e => Object.values(db.users).find(u => u.email === e);
 
 async function hashPw(pw) { const salt = crypto.randomBytes(16); const k = await scrypt(pw, salt, 64); return salt.toString('hex') + ':' + k.toString('hex'); }
@@ -236,7 +239,7 @@ function newSession(u) {
   return tok;
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, mail: MAIL.mode }));
+app.get('/api/health', (req, res) => res.json({ ok: true, mail: MAIL.mode, ai: AI.enabled() }));
 
 app.post('/api/signup', wrap(async (req, res) => {
   if (!limit('su:' + ip(req), 20, 3600e3)) return fail(res, 429, 'rate', 'Trop de tentatives. Réessaie plus tard.');
@@ -245,12 +248,14 @@ app.post('/api/signup', wrap(async (req, res) => {
   if (!ROLES.includes(role)) return fail(res, 400, 'role', 'Choisis ton type de compte.');
   if (name.length < 2) return fail(res, 400, 'name', 'Écris ton prénom (2 lettres au moins).');
   if (!validEmail(email)) return fail(res, 400, 'email', 'Adresse e-mail invalide.');
+  if (role === 'student' && !AI.validGrade(b.grade)) return fail(res, 400, 'grade', 'Choisis ta classe.');
   if (pw.length < 8 || pw.length > 72) return fail(res, 400, 'password', 'Le mot de passe doit contenir au moins 8 caractères.');
   if (b.consent !== true) return fail(res, 400, 'consent', 'Accepte les conditions pour créer ton compte.');
   let u = byEmail(email);
   if (u && u.verified) return fail(res, 409, 'email_used', 'Cette adresse e-mail a déjà un compte. Connecte-toi.');
   if (!u) { u = { id: crypto.randomUUID(), email, createdAt: now(), verified: false }; db.users[u.id] = u; }
   u.role = role; u.name = name; u.passHash = await hashPw(pw);
+  if (role === 'student') u.grade = b.grade; else delete u.grade;
   ensureMat(u);
   save();
   const r = await issueCode(u);
@@ -334,6 +339,13 @@ app.get('/api/me', auth, (req, res) => {
   res.json(out);
 });
 
+app.put('/api/me', auth, need('student'), (req, res) => {
+  const g = (req.body || {}).grade;
+  if (!AI.validGrade(g)) return fail(res, 400, 'grade', 'Choisis ta classe.');
+  req.user.grade = g; save();
+  res.json({ user: pub(req.user) });
+});
+
 app.delete('/api/me', auth, wrap(async (req, res) => {
   const u = req.user;
   if (!(await checkPw(String((req.body || {}).password || ''), u.passHash))) return fail(res, 401, 'login', 'Mot de passe incorrect.');
@@ -350,15 +362,63 @@ app.delete('/api/me', auth, wrap(async (req, res) => {
 function sanitizeProgress(b) {
   const out = { mastery: {}, hist: [], done: [], updatedAt: now() };
   const m = (b && b.mastery) || {};
-  CHAPTERS.forEach(k => { const v = +m[k]; if (isFinite(v) && m[k] !== null && m[k] !== undefined) out.mastery[k] = Math.max(0, Math.min(1, v)); });
+  Object.keys(m).slice(0, 400).forEach(k => { const v = +m[k]; if (isTopic(k) && isFinite(v) && m[k] !== null && m[k] !== undefined && m[k] !== '') out.mastery[k] = Math.max(0, Math.min(1, v)); });
   (Array.isArray(b && b.hist) ? b.hist.slice(-200) : []).forEach(h => {
-    if (h && CHAPTERS.includes(h.chap) && isFinite(+h.t)) out.hist.push({ t: +h.t, chap: h.chap, ok: !!h.ok, first: h.first === undefined ? undefined : !!h.first, tag: ['methode', 'calcul', 'signe', 'oubli', 'notion'].includes(h.tag) ? h.tag : null });
+    if (h && isTopic(h.chap) && isFinite(+h.t)) out.hist.push({ t: +h.t, chap: h.chap, ok: !!h.ok, first: h.first === undefined ? undefined : !!h.first, tag: ['methode', 'calcul', 'signe', 'oubli', 'notion'].includes(h.tag) ? h.tag : null });
   });
   (Array.isArray(b && b.done) ? b.done.slice(-60) : []).forEach(t => { if (isFinite(+t)) out.done.push(+t); });
   return out;
 }
 app.put('/api/progress', auth, need('student'), (req, res) => { db.progress[req.user.id] = sanitizeProgress(req.body); save(); res.json({ ok: true }); });
 app.get('/api/progress', auth, need('student'), (req, res) => res.json(db.progress[req.user.id] || null));
+
+/* ----- IA : exercices vérifiés et coach (clé ANTHROPIC_API_KEY sur le serveur) ----- */
+const AI_MSG = {
+  ai_off: 'L’IA n’est pas encore activée sur le serveur.',
+  ai_busy: 'L’IA est très sollicitée. Réessaie dans une minute.',
+  ai_key: 'L’IA est mal configurée sur le serveur.',
+  ai_unreachable: 'L’IA ne répond pas. Réessaie dans un instant.',
+  ai_http: 'L’IA a refusé la demande. Réessaie dans un instant.',
+  ai_failed: 'Je n’ai pas réussi à préparer des exercices sûrs pour ce sujet. Essaie de reformuler le sujet ou réessaie.'
+};
+function aiFail(res, e) {
+  if (!(e instanceof AI.AIError)) throw e;
+  if (e.code !== 'ai_off') console.error('[IA]', e.code, e.message);
+  return fail(res, e.code === 'ai_off' || e.code === 'ai_key' ? 503 : e.code === 'ai_busy' ? 429 : 502, e.code, AI_MSG[e.code] || AI_MSG.ai_http);
+}
+function aiGate(req, res, key, max, calls) {
+  if (!AI.enabled()) { fail(res, 503, 'ai_off', AI_MSG.ai_off); return false; }
+  if (!limit(key + req.user.id, max, 3600e3)) { fail(res, 429, 'rate', 'Tu as beaucoup travaillé avec l’IA. Reprends dans un moment.'); return false; }
+  if (!AI.budget(calls)) { fail(res, 429, 'ai_busy', AI_MSG.ai_busy); return false; }
+  return true;
+}
+const SUBJECT_LIST = AI.SUBJECTS;
+const courseText = v => AI.str(v, 6000);
+
+app.post('/api/exercises', auth, need('student'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const grade = AI.validGrade(b.grade) ? b.grade : req.user.grade;
+  if (!AI.validGrade(grade)) return fail(res, 400, 'grade', 'Choisis d’abord ta classe.');
+  if (!SUBJECT_LIST.includes(b.subject)) return fail(res, 400, 'subject', 'Matière invalide.');
+  const topic = AI.str(b.topic, 100);
+  if (topic.length < 2) return fail(res, 400, 'topic', 'Indique le sujet à travailler.');
+  const level = Math.max(1, Math.min(3, Math.round(+b.level) || 2)), n = Math.max(1, Math.min(8, Math.round(+b.n) || 5));
+  if (!aiGate(req, res, 'ex:', 30, 2)) return;
+  try { res.json(await AI.exercises({ grade, subject: b.subject, topic, level, n, course: courseText(b.course) })); }
+  catch (e) { aiFail(res, e); }
+}));
+
+app.post('/api/coach', auth, need('student'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const messages = AI.cleanMessages(b.messages);
+  if (!messages.length) return fail(res, 400, 'messages', 'Écris ta question.');
+  const grade = AI.validGrade(b.grade) ? b.grade : req.user.grade;
+  if (!aiGate(req, res, 'co:', 80, 1)) return;
+  try {
+    const text = await AI.coach({ name: req.user.name, grade, subject: SUBJECT_LIST.includes(b.subject) ? b.subject : '', topic: AI.str(b.topic, 100), course: courseText(b.course), messages });
+    res.json({ text });
+  } catch (e) { aiFail(res, e); }
+}));
 
 function summarize(p) {
   if (!p) return { empty: true, mastery: {}, rate: null, exercises: 0, sessions: 0, week: 0, last: null, errors: {} };
@@ -393,7 +453,7 @@ app.get('/api/children', auth, need(['parent', 'tutor']), (req, res) => {
   const list = db.links.filter(l => l.adultId === req.user.id).map(l => {
     const s = db.users[l.studentId]; if (!s) return null;
     const o = { linkId: l.id, studentId: s.id, name: s.name, summary: summarize(db.progress[s.id]) };
-    o.matricule = s.matricule;
+    o.matricule = s.matricule; o.grade = s.grade || null;
     o.works = worksFor(s.id, req.user.role === 'tutor' ? req.user.id : null);
     if (req.user.role === 'tutor') o.assignments = db.assignments.filter(a => a.tutorId === req.user.id && a.studentId === s.id).map(a => ({ id: a.id, chap: a.chap, note: a.note, at: a.at, doneAt: a.doneAt }));
     return o;
@@ -404,7 +464,7 @@ app.get('/api/children', auth, need(['parent', 'tutor']), (req, res) => {
 /* ----- Devoirs du répétiteur ----- */
 app.post('/api/assign', auth, need('tutor'), (req, res) => {
   const b = req.body || {};
-  if (!CHAPTERS.includes(b.chap)) return fail(res, 400, 'chap', 'Chapitre invalide.');
+  if (!isTopic(b.chap)) return fail(res, 400, 'chap', 'Chapitre invalide.');
   if (!db.links.some(l => l.adultId === req.user.id && l.studentId === b.studentId)) return fail(res, 403, 'link', 'Cet élève n’est pas dans ta liste.');
   const a = { id: crypto.randomUUID(), tutorId: req.user.id, studentId: b.studentId, chap: b.chap, note: clean(b.note, 200), at: now(), doneAt: null };
   db.assignments.push(a); save();

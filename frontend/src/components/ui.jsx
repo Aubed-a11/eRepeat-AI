@@ -1,5 +1,4 @@
 import React from 'react';
-import { CH } from '../lib/content.js';
 import { P } from '../lib/student.js';
 
 const Svg = ({ children }) => <svg viewBox="0 0 24 24" aria-hidden="true">{children}</svg>;
@@ -47,13 +46,16 @@ export function MastBar({ value }) {
   return <div className={'bar ' + (typeof value !== 'number' ? '' : value < .45 ? 'bad' : value < .7 ? 'warn' : '')}><i style={{ width: v + '%' }} /></div>;
 }
 
-export function ChapterRows({ s, onPick }) {
-  return CH.map(c => {
+/* Liste de sujets avec maîtrise. aiOn : l'IA du serveur est activée (sert à signaler les sujets sans exercices prêts). */
+export function TopicRows({ list, s, onPick, sel, aiOn, hasLocal }) {
+  return list.map(c => {
     const p = P(s, c.id);
+    const note = p === null ? ' · pas encore évalué' : '';
+    const src = hasLocal ? (hasLocal(c.id) ? '' : aiOn === false ? ' · exercices IA bientôt' : '') : '';
     return (
-      <button key={c.id} className="chrow" data-a="guided" data-c={c.id} onClick={() => onPick(c.id)}>
+      <button key={c.id} className={'chrow' + (sel === c.id ? ' sel' : '')} data-a="guided" data-c={c.id} aria-pressed={sel === c.id} onClick={() => onPick(c)}>
         <span className="ic">{c.ic}</span>
-        <span className="tx"><b>{c.name}</b><small>{c.subj}{p === null ? ' · pas encore évalué' : ''}</small><MastBar value={p === null ? undefined : p} /></span>
+        <span className="tx"><b>{c.name}</b><small>{c.subjName}{note}{src}</small><MastBar value={p === null ? undefined : p} /></span>
         <span className="pct">{p === null ? '0%' : Math.round(p * 100) + '%'}</span>
       </button>
     );

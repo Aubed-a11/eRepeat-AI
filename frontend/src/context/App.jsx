@@ -63,6 +63,12 @@ export function AuthProvider({ children }) {
     return () => clearInterval(t);
   }, [uid, refreshMe, refreshUnread]);
 
+  const setGrade = useCallback(async grade => {
+    const r = await api('PUT', '/me', { grade });
+    const cur = getAuth();
+    if (cur) { const a = { token: cur.token, user: r.user }; storeAuth(a); setAuth(a); }
+  }, []);
+
   const deleteAccount = useCallback(async password => {
     const id = getAuth().user.id;
     await api('DELETE', '/me', { password });
@@ -70,7 +76,7 @@ export function AuthProvider({ children }) {
   }, [signOutLocal]);
 
   return (
-    <AuthCtx.Provider value={{ auth, user: auth && auth.user, linked, unread, setUnread, refreshUnread, refreshMe, signIn, logout, deleteAccount }}>
+    <AuthCtx.Provider value={{ auth, user: auth && auth.user, linked, unread, setUnread, refreshUnread, refreshMe, signIn, logout, deleteAccount, setGrade }}>
       {children}
     </AuthCtx.Provider>
   );

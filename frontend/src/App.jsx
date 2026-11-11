@@ -12,6 +12,7 @@ import { TutorWorkDetail, TutorWorks } from './screens/TutorWorks.jsx';
 import { AdultHome, Kids } from './screens/Adult.jsx';
 import { Chat, Threads } from './screens/Messages.jsx';
 import Profile from './screens/Profile.jsx';
+import { GradeSelect } from './components/Focus.jsx';
 
 const TABS = {
   student: [['home', 'Accueil', '/accueil'], ['train', 'Exercices', '/exercices'], ['coach', 'Coach', '/coach'], ['prog', 'Résultats', '/resultats'], ['me', 'Profil', '/profil']],
@@ -69,6 +70,29 @@ function Layout({ children }) {
   );
 }
 
+/* Compte élève créé avant l'ajout des classes : on demande la classe avant tout. */
+function PickGrade() {
+  const { setGrade, logout } = useAuth();
+  const [g, setG] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!g) { setErr('Choisis ta classe.'); return; }
+    setBusy(true); setErr('');
+    try { await setGrade(g); } catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return (
+    <Layout>
+      <h1>Choisis ta classe</h1>
+      <p className="sub">Les exercices et le coach sont adaptés à ta classe. Tu pourras la changer dans ton profil.</p>
+      <GradeSelect id="pick-grade" value={g} onChange={setG} />
+      <div id="au-err" className={'err' + (err ? ' on' : '')} role="alert">{err}</div>
+      <button className="btn big block" data-a="grade-save" disabled={busy} onClick={save}>Continuer</button>
+      <button className="btn ghost block" style={{ marginTop: 8 }} data-a="logout" onClick={logout}>Se déconnecter</button>
+    </Layout>
+  );
+}
+
 function AppRoutes() {
   const { user } = useAuth();
   if (!user) {
@@ -87,6 +111,7 @@ function AppRoutes() {
     );
   }
   const student = user.role === 'student';
+  if (student && !user.grade) return <PickGrade />;
   const body = (
     <Layout>
       <Routes>
